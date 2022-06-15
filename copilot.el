@@ -36,7 +36,7 @@
 (defcustom copilot-lispy-integration nil
   "Enable lispy integration.
 
-This should help with cases when accepting a completion results in
+This should help with cases when accepting a completion result in
 unbalanced parentheses."
   :group 'copilot
   :type 'boolean)
@@ -407,7 +407,7 @@ For Copilot, COL is always 0. USER-POS is the cursor position (for verification 
            (t-completion (funcall (or transform-fn 'identity) completion)))
       (copilot--async-request 'notifyAccepted (list :uuid uuid))
       (copilot-clear-overlay)
-      (copilot--insert-completion completion start)
+      (copilot--insert-completion t-completion start)
       ;; trigger completion again if not fully accepted
       (unless (equal completion t-completion)
         (copilot-complete))
