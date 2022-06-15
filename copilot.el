@@ -33,6 +33,14 @@
   :group 'copilot
   :type 'string)
 
+(defcustom copilot-lispy-integration nil
+  "Enable lispy integration.
+
+This should help with cases when accepting a completion results in
+unbalanced parentheses."
+  :group 'copilot
+  :type 'boolean)
+
 (defconst copilot--base-dir
   (file-name-directory
    (or load-file-name
@@ -367,6 +375,28 @@ For Copilot, COL is always 0. USER-POS is the cursor position (for verification 
     (setq copilot--real-posn nil)
     (setq copilot--overlay nil)))
 
+;; XXX to avoid (require 'lispy) and shut up the byte compiler.
+(declare-function lispy--maybe-safe-delete-region "lispy")
+(declare-function lispy--find-safe-regions "lispy")
+
+(defun copilot--insert-completion (completion start)
+  "Insert COMPLETION at point START."
+  (if (and copilot-lispy-integration
+           (bound-and-true-p lispy-mode))
+      (progn
+        (lispy--maybe-safe-delete-region start (line-end-position))
+        (insert
+         (with-temp-buffer
+           (insert completion)
+           (let ((safe-regions (lispy--find-safe-regions (point-min) (point-max)))
+                 safe-strings)
+             (dolist (safe-region safe-regions)
+               (push (filter-buffer-substring (car safe-region) (cdr safe-region))
+                     safe-strings))
+             (apply #'concat safe-strings)))))
+    (delete-region start (line-end-position))
+    (insert completion)))
+
 (defun copilot-accept-completion (&optional transform-fn)
   "Accept completion. Return t if there is a completion. Use TRANSFORM-FN to transform completion if provided."
   (interactive)
@@ -377,9 +407,8 @@ For Copilot, COL is always 0. USER-POS is the cursor position (for verification 
            (t-completion (funcall (or transform-fn 'identity) completion)))
       (copilot--async-request 'notifyAccepted (list :uuid uuid))
       (copilot-clear-overlay)
-      (delete-region start (line-end-position))
-      (insert t-completion)
-      ; trigger completion again if not fully accepted
+      (copilot--insert-completion completion start)
+      ;; trigger completion again if not fully accepted
       (unless (equal completion t-completion)
         (copilot-complete))
       t)))
