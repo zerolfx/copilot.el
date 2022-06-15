@@ -41,6 +41,19 @@ unbalanced parentheses."
   :group 'copilot
   :type 'boolean)
 
+(defcustom copilot-insert-completion-hooks
+  '(copilot--insert-completion-lispy
+    copilot--insert-completion-plain)
+  "Functions to insert completions.
+
+The first function that returns non-nil will be considered as used.
+
+The function should take two arguments: the completion string and
+the point where to insert it.  Take a look at
+`copilot--insert-completion-plain' for a basic implementation."
+  :group 'copilot
+  :type 'hook)
+
 (defconst copilot--base-dir
   (file-name-directory
    (or load-file-name
@@ -379,23 +392,28 @@ For Copilot, COL is always 0. USER-POS is the cursor position (for verification 
 (declare-function lispy--maybe-safe-delete-region "lispy")
 (declare-function lispy--find-safe-regions "lispy")
 
-(defun copilot--insert-completion (completion start)
+(defun copilot--insert-completion-lispy (completion start)
+  "Insert COMPLETION at point START with lispy."
+  (when (and copilot-lispy-integration
+             (bound-and-true-p lispy-mode))
+    (progn
+      (lispy--maybe-safe-delete-region start (line-end-position))
+      (insert
+       (with-temp-buffer
+         (insert completion)
+         (let ((safe-regions (lispy--find-safe-regions (point-min) (point-max)))
+               safe-strings)
+           (dolist (safe-region safe-regions)
+             (push (filter-buffer-substring (car safe-region) (cdr safe-region))
+                   safe-strings))
+           (apply #'concat safe-strings))))
+      t)))
+
+(defun copilot--insert-completion-plain (completion start)
   "Insert COMPLETION at point START."
-  (if (and copilot-lispy-integration
-           (bound-and-true-p lispy-mode))
-      (progn
-        (lispy--maybe-safe-delete-region start (line-end-position))
-        (insert
-         (with-temp-buffer
-           (insert completion)
-           (let ((safe-regions (lispy--find-safe-regions (point-min) (point-max)))
-                 safe-strings)
-             (dolist (safe-region safe-regions)
-               (push (filter-buffer-substring (car safe-region) (cdr safe-region))
-                     safe-strings))
-             (apply #'concat safe-strings)))))
-    (delete-region start (line-end-position))
-    (insert completion)))
+  (delete-region start (line-end-position))
+  (insert completion)
+  t)
 
 (defun copilot-accept-completion (&optional transform-fn)
   "Accept completion. Return t if there is a completion. Use TRANSFORM-FN to transform completion if provided."
@@ -407,7 +425,9 @@ For Copilot, COL is always 0. USER-POS is the cursor position (for verification 
            (t-completion (funcall (or transform-fn 'identity) completion)))
       (copilot--async-request 'notifyAccepted (list :uuid uuid))
       (copilot-clear-overlay)
-      (copilot--insert-completion t-completion start)
+      (run-hook-with-args-until-success
+       'copilot-insert-completion-hooks
+       t-completion start)
       ;; trigger completion again if not fully accepted
       (unless (equal completion t-completion)
         (copilot-complete))
